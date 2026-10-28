@@ -118,6 +118,9 @@
   .car-card .top{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;}
   .car-card .name{font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:21px; line-height:1.1;}
   .car-card .lot{color:var(--text-3); font-size:12.5px; margin-top:2px;}
+  .car-card .split{color:var(--text-2); font-size:12px; margin-top:-2px;}
+  .check-row{display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:var(--text); text-transform:none; cursor:pointer;}
+  .check-row input{width:auto;}
   .pill{font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:20px; text-transform:uppercase; letter-spacing:.3px; white-space:nowrap;}
   .pill.active{background:#d9622b22; color:var(--accent-strong);}
   .pill.sold{background:#147a4e22; color:var(--good);}
@@ -166,6 +169,8 @@
       <nav class="tabs" id="tabs">
         <button data-tab="dashboard">Дашборд</button>
         <button data-tab="cars">Машины</button>
+        <button data-tab="investors">Инвесторы</button>
+        <button data-tab="box">Бокс</button>
       </nav>
       <div class="hdr-right">
         <nav class="tabs" id="langSwitch">
@@ -203,6 +208,7 @@
   var state = {
     cars: new Map(),
     txs: new Map(),
+    boxExpenses: new Map(),
     dbOK: null,
     tab: 'dashboard',
     carFilter: 'all',
@@ -240,7 +246,13 @@
       all:'Все', addCar:'+ Машина', edit:'Изменить', noCarsFound:'Машин не найдено. Добавьте первую.',
       cat_expense_purchase:'Покупка авто', cat_expense_auction_fee:'Аукционный сбор', cat_expense_transport:'Доставка / транспорт',
       cat_expense_parts:'Запчасти', cat_expense_repair:'Ремонт / работы', cat_expense_customs:'Растаможка / налоги', cat_expense_other:'Прочее (расход)',
-      cat_income_car_sale:'Продажа авто', cat_income_parts_sale:'Продажа запчастей', cat_income_insurance:'Страховая выплата', cat_income_other:'Прочее (доход)'
+      cat_income_car_sale:'Продажа авто', cat_income_parts_sale:'Продажа запчастей', cat_income_insurance:'Страховая выплата', cat_income_other:'Прочее (доход)',
+      tabInvestors:'Инвесторы', tabBox:'Бокс',
+      investmentCar:'Инвестиционная машина (деньги партнёра)', investorName:'Имя инвестора', investorNamePlaceholder:'напр. Алексей',
+      yourShare:'Ваша доля', investorShare:'Доля инвестора',
+      noInvestorCars:'Инвестиционных машин пока нет. Добавьте первую.', addInvestorCar:'+ Машина инвестора',
+      boxTotalSpent:'Потрачено на бокс', addBoxExpense:'+ Расход', noBoxExpenses:'Расходов пока нет.',
+      confirmDeleteBoxExpense:'Удалить расход?', newBoxExpense:'Новый расход', editBoxExpense:'Изменить расход'
     },
     en: {
       appTitle:'Car Ledger', tabDashboard:'Dashboard', tabCars:'Cars', guest:'Guest', quickAdd:'+ Entry',
@@ -261,7 +273,13 @@
       all:'All', addCar:'+ Car', edit:'Edit', noCarsFound:'No cars found. Add your first one.',
       cat_expense_purchase:'Car purchase', cat_expense_auction_fee:'Auction fee', cat_expense_transport:'Delivery / transport',
       cat_expense_parts:'Parts', cat_expense_repair:'Repair / labor', cat_expense_customs:'Customs / taxes', cat_expense_other:'Other (expense)',
-      cat_income_car_sale:'Car sale', cat_income_parts_sale:'Parts sale', cat_income_insurance:'Insurance payout', cat_income_other:'Other (income)'
+      cat_income_car_sale:'Car sale', cat_income_parts_sale:'Parts sale', cat_income_insurance:'Insurance payout', cat_income_other:'Other (income)',
+      tabInvestors:'Investors', tabBox:'Box',
+      investmentCar:"Investment car (partner's money)", investorName:"Investor's name", investorNamePlaceholder:'e.g. Alex',
+      yourShare:'Your share', investorShare:"Investor's share",
+      noInvestorCars:'No investment cars yet. Add your first one.', addInvestorCar:'+ Investor car',
+      boxTotalSpent:'Spent on the box', addBoxExpense:'+ Expense', noBoxExpenses:'No expenses yet.',
+      confirmDeleteBoxExpense:'Delete this expense?', newBoxExpense:'New expense', editBoxExpense:'Edit expense'
     }
   };
   function t(key){ var d = LANG[state.lang] || LANG.ru; return (d[key]!=null ? d[key] : (LANG.ru[key]!=null?LANG.ru[key]:key)); }
@@ -292,6 +310,17 @@
   function allStats(){
     var invested=0, income=0;
     state.txs.forEach(function(t){
+      var c = state.cars.get(t.carId);
+      if(c && c.isInvestment) return;
+      if(t.kind==='expense') invested += Number(t.amount)||0; else income += Number(t.amount)||0;
+    });
+    return { invested: invested, income: income, profit: income-invested };
+  }
+  function investorStats(){
+    var invested=0, income=0;
+    state.txs.forEach(function(t){
+      var c = state.cars.get(t.carId);
+      if(!c || !c.isInvestment) return;
       if(t.kind==='expense') invested += Number(t.amount)||0; else income += Number(t.amount)||0;
     });
     return { invested: invested, income: income, profit: income-invested };
@@ -337,6 +366,12 @@
           state.txs = m;
           renderAll();
         }, function(err){ console.error(err); });
+        db.collection('boxExpenses').onSnapshot(function(snap){
+          var m = new Map();
+          snap.forEach(function(doc){ m.set(doc.id, Object.assign({id:doc.id}, doc.data())); });
+          state.boxExpenses = m;
+          renderAll();
+        }, function(err){ console.error(err); });
         renderAll();
       });
     }catch(e){
@@ -371,6 +406,16 @@
     if(!window.confirm(t('confirmDeleteTx'))) return;
     db.collection('transactions').doc(id).delete();
   }
+  function saveBoxExpense(data, id){
+    if(!db) return Promise.reject();
+    if(id) return db.collection('boxExpenses').doc(id).update(data);
+    return db.collection('boxExpenses').add(Object.assign({}, data, {addedBy: state.me||'—', createdAt: new Date().toISOString()}));
+  }
+  function deleteBoxExpense(id){
+    if(!db) return;
+    if(!window.confirm(t('confirmDeleteBoxExpense'))) return;
+    db.collection('boxExpenses').doc(id).delete();
+  }
 
   var modalRoot = document.getElementById('modal-root');
   function closeModal(){ state.modalKind=null; state.detailCarId=null; modalRoot.innerHTML=''; }
@@ -383,11 +428,12 @@
     bd.addEventListener('mousedown', function(e){ if(e.target===bd) closeModal(); });
   }
 
-  function openCarModal(carId){
+  function openCarModal(carId, presetInvestment){
     ensureName(false);
     state.modalKind = 'carForm';
     var car = carId ? state.cars.get(carId) : null;
     var isNew = !car;
+    var defaultInvestment = car ? !!car.isInvestment : !!presetInvestment;
     modalRoot.innerHTML = backdrop(
       '<div class="modal-head"><h2>'+(isNew?t('newCar'):t('editCar'))+'</h2>'+
       '<button class="btn ghost" id="mClose">✕</button></div>'+
@@ -399,6 +445,12 @@
         '<div class="field-row">'+
           '<div class="field"><label>'+t('year')+'</label><input id="f-year" type="number" min="1960" max="2100" value="'+esc(car&&car.year||'')+'"></div>'+
           '<div class="field"><label>'+t('lot')+'</label><input id="f-lot" value="'+esc(car&&car.lot||'')+'"></div>'+
+        '</div>'+
+        '<div class="field">'+
+          '<label class="check-row"><input type="checkbox" id="f-investment"'+(defaultInvestment?' checked':'')+'> '+t('investmentCar')+'</label>'+
+        '</div>'+
+        '<div class="field-row" id="investorNameField"'+(defaultInvestment?'':' hidden')+'>'+
+          '<div class="field"><label>'+t('investorName')+'</label><input id="f-investor-name" value="'+esc(car&&car.investorName||'')+'" placeholder="'+t('investorNamePlaceholder')+'"></div>'+
         '</div>'+
         '<div class="field-row">'+
           '<div class="field"><label>'+t('purchaseDate')+'</label><input id="f-pdate" type="date" value="'+esc(car&&car.purchaseDate||todayISO())+'"></div>'+
@@ -419,6 +471,9 @@
     document.getElementById('mClose').onclick = closeModal;
     document.getElementById('mCancel').onclick = closeModal;
     if(!isNew) document.getElementById('mDelete').onclick = function(){ deleteCarCascade(carId); };
+    var investCk = document.getElementById('f-investment');
+    var investField = document.getElementById('investorNameField');
+    investCk.addEventListener('change', function(){ investField.hidden = !investCk.checked; });
     document.getElementById('carForm').addEventListener('submit', function(e){
       e.preventDefault();
       var data = {
@@ -426,6 +481,8 @@
         model: document.getElementById('f-model').value.trim(),
         year: Number(document.getElementById('f-year').value)||null,
         lot: document.getElementById('f-lot').value.trim(),
+        isInvestment: document.getElementById('f-investment').checked,
+        investorName: document.getElementById('f-investor-name').value.trim(),
         purchaseDate: document.getElementById('f-pdate').value || todayISO(),
         status: document.getElementById('f-status').value,
         notes: document.getElementById('f-notes').value.trim()
@@ -508,6 +565,40 @@
     renderForm();
   }
 
+  function openBoxModal(id){
+    ensureName(false);
+    state.modalKind = 'boxForm';
+    var b = id ? state.boxExpenses.get(id) : null;
+    modalRoot.innerHTML = backdrop(
+      '<div class="modal-head"><h2>'+(id?t('editBoxExpense'):t('newBoxExpense'))+'</h2>'+
+      '<button class="btn ghost" id="mClose">✕</button></div>'+
+      '<form id="boxForm">'+
+        '<div class="field-row">'+
+          '<div class="field"><label>'+t('date')+'</label><input id="f-date" type="date" value="'+esc(b&&b.date||todayISO())+'"></div>'+
+          '<div class="field"><label>'+t('amount')+'</label><input id="f-amount" type="number" min="0" step="1" required value="'+esc(b&&b.amount||'')+'"></div>'+
+        '</div>'+
+        '<div class="field"><label>'+t('comment')+'</label><input id="f-note" value="'+esc(b&&b.note||'')+'" placeholder="'+t('commentPlaceholder')+'"></div>'+
+        '<div class="modal-actions">'+
+          (id ? '<button type="button" class="btn danger" id="mDelete">'+t('delete')+'</button>' : '') +
+          '<button type="button" class="btn ghost" id="mCancel">'+t('cancel')+'</button>'+
+          '<button type="submit" class="btn primary">'+t('save')+'</button>'+
+        '</div>'+
+      '</form>', false);
+    wireBackdropClose();
+    document.getElementById('mClose').onclick = closeModal;
+    document.getElementById('mCancel').onclick = closeModal;
+    if(id) document.getElementById('mDelete').onclick = function(){ deleteBoxExpense(id); closeModal(); };
+    document.getElementById('boxForm').addEventListener('submit', function(e){
+      e.preventDefault();
+      var data = {
+        date: document.getElementById('f-date').value || todayISO(),
+        amount: Number(document.getElementById('f-amount').value)||0,
+        note: document.getElementById('f-note').value.trim()
+      };
+      saveBoxExpense(data, id).then(function(){ closeModal(); });
+    });
+  }
+
   function openCarDetail(carId){
     state.modalKind = 'detail';
     state.detailCarId = carId;
@@ -543,11 +634,13 @@
         '<span class="pill '+esc(car.status)+'">'+(car.status==='sold'?t('statusSold'):t('statusActive'))+'</span>'+
       '</div><button class="btn ghost" id="mClose">✕</button></div>'+
       (car.lot ? '<p style="color:var(--text-3); font-size:13px; margin:-8px 0 14px;">'+t('lotVin')+esc(car.lot)+'</p>' : '') +
+      (car.isInvestment && car.investorName ? '<p style="color:var(--text-3); font-size:13px; margin:-8px 0 14px;">'+t('investorName')+': '+esc(car.investorName)+'</p>' : '') +
       '<div class="detail-stat">'+
         '<div class="box"><div class="l">'+t('invested')+'</div><div class="v tnum">'+fmtY(s.invested)+'</div></div>'+
         '<div class="box"><div class="l">'+t('revenue')+'</div><div class="v tnum">'+fmtY(s.income)+'</div></div>'+
         '<div class="box"><div class="l">'+t('profit')+'</div><div class="v tnum" style="color:'+(s.profit>=0?'var(--good)':'var(--bad)')+'">'+signedY(s.profit)+'</div></div>'+
       '</div>'+
+      (car.isInvestment ? '<p style="color:var(--text-2); font-size:13px; margin:-10px 0 14px;">'+t('yourShare')+': '+signedY(s.profit/2)+' · '+t('investorShare')+(car.investorName?' ('+esc(car.investorName)+')':'')+': '+signedY(s.profit/2)+'</p>' : '') +
       '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">'+
         '<span class="section-title" style="margin:0;">'+t('entries')+'</span>'+
         '<div style="display:flex; gap:8px;">'+
@@ -574,10 +667,10 @@
   function renderDashboard(){
     var s = allStats();
     var activeCars=0, soldCars=0;
-    state.cars.forEach(function(c){ if(c.status==='sold') soldCars++; else activeCars++; });
+    state.cars.forEach(function(c){ if(c.isInvestment) return; if(c.status==='sold') soldCars++; else activeCars++; });
 
     var perCar = [];
-    state.cars.forEach(function(c){ perCar.push(Object.assign({car:c}, carStats(c.id))); });
+    state.cars.forEach(function(c){ if(c.isInvestment) return; perCar.push(Object.assign({car:c}, carStats(c.id))); });
     perCar.sort(function(a,b){ return b.profit - a.profit; });
     var maxAbs = perCar.reduce(function(m,p){ return Math.max(m, Math.abs(p.profit)); }, 1);
 
@@ -592,7 +685,7 @@
     }).join('') : '<p class="empty">'+t('addCarToSeeProfit')+'</p>';
 
     var feed = [];
-    state.txs.forEach(function(t){ feed.push(t); });
+    state.txs.forEach(function(t){ var c = state.cars.get(t.carId); if(c && c.isInvestment) return; feed.push(t); });
     feed.sort(function(a,b){ return (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''); });
     feed = feed.slice(0,8);
     var feedHtml = feed.length ? feed.map(function(t){
@@ -619,7 +712,7 @@
 
   function renderCars(){
     var list = [];
-    state.cars.forEach(function(c){ list.push(c); });
+    state.cars.forEach(function(c){ if(!c.isInvestment) list.push(c); });
     if(state.carFilter==='active') list = list.filter(function(c){ return c.status!=='sold'; });
     if(state.carFilter==='sold') list = list.filter(function(c){ return c.status==='sold'; });
     list.sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
@@ -650,14 +743,84 @@
     '<div class="car-grid">'+cardsHtml+'</div>';
   }
 
+  function renderInvestors(){
+    var list = [];
+    state.cars.forEach(function(c){ if(c.isInvestment) list.push(c); });
+    list.sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
+
+    var s = investorStats();
+
+    var cardsHtml = list.length ? list.map(function(c){
+      var st = carStats(c.id);
+      var half = st.profit/2;
+      return '<div class="car-card">'+
+        '<div class="top"><div><div class="name">'+esc(carName(c))+'</div>'+(c.lot?'<div class="lot">'+esc(c.lot)+'</div>':'')+
+          (c.investorName?'<div class="lot">'+esc(t('investorName'))+': '+esc(c.investorName)+'</div>':'')+
+        '</div>'+
+        '<span class="pill '+esc(c.status)+'">'+(c.status==='sold'?t('statusSold'):t('statusActive'))+'</span></div>'+
+        '<div class="stat3">'+
+          '<div><div class="l">'+t('invested')+'</div><div class="v tnum">'+fmtY(st.invested)+'</div></div>'+
+          '<div><div class="l">'+t('revenue')+'</div><div class="v tnum">'+fmtY(st.income)+'</div></div>'+
+          '<div><div class="l">'+t('profit')+'</div><div class="v tnum" style="color:'+(st.profit>=0?'var(--good)':'var(--bad)')+'">'+signedY(st.profit)+'</div></div>'+
+        '</div>'+
+        '<div class="split">'+t('yourShare')+': '+signedY(half)+' · '+t('investorShare')+': '+signedY(half)+'</div>'+
+        '<div class="card-actions">'+
+          '<button class="btn small" data-open-car="'+c.id+'">'+t('entries')+'</button>'+
+          '<button class="btn ghost small" data-edit-car="'+c.id+'">'+t('edit')+'</button>'+
+        '</div>'+
+      '</div>';
+    }).join('') : '<p class="empty">'+t('noInvestorCars')+'</p>';
+
+    return '<div class="kpi-grid">'+
+        '<div class="kpi"><div class="lbl">'+t('totalInvested')+'</div><div class="val tnum">'+fmtY(s.invested)+'</div></div>'+
+        '<div class="kpi"><div class="lbl">'+t('totalRevenue')+'</div><div class="val tnum">'+fmtY(s.income)+'</div></div>'+
+        '<div class="kpi"><div class="lbl">'+t('yourShare')+'</div><div class="val tnum '+(s.profit>=0?'good':'bad')+'">'+signedY(s.profit/2)+'</div></div>'+
+        '<div class="kpi"><div class="lbl">'+t('investorShare')+'</div><div class="val tnum '+(s.profit>=0?'good':'bad')+'">'+signedY(s.profit/2)+'</div></div>'+
+      '</div>'+
+      '<div style="display:flex; justify-content:flex-end; margin-bottom:14px;">'+
+        '<button class="btn primary small" id="newInvestorCarBtn">'+t('addInvestorCar')+'</button>'+
+      '</div>'+
+      '<div class="car-grid">'+cardsHtml+'</div>';
+  }
+
+  function renderBox(){
+    var list = [];
+    state.boxExpenses.forEach(function(b){ list.push(b); });
+    list.sort(function(a,b){ return (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''); });
+    var total = list.reduce(function(sum,b){ return sum + (Number(b.amount)||0); }, 0);
+
+    var rowsHtml = list.length ? list.map(function(b){
+      return '<div class="tx-row">'+
+        '<div class="tx-date">'+fmtDate(b.date)+'</div>'+
+        '<div class="tx-mid"><div class="cat">'+(b.note?esc(b.note):'—')+'</div>'+
+          '<div class="who">'+esc(b.addedBy||'—')+'</div></div>'+
+        '<div class="tx-amt tnum" style="color:var(--bad)">−'+fmtY(b.amount)+'</div>'+
+        '<div class="tx-actions">'+
+          '<button class="btn ghost small" data-edit-box="'+b.id+'">✎</button>'+
+          '<button class="btn ghost small" data-del-box="'+b.id+'">🗑</button>'+
+        '</div>'+
+      '</div>';
+    }).join('') : '<p class="empty">'+t('noBoxExpenses')+'</p>';
+
+    return '<div class="kpi-grid">'+
+        '<div class="kpi"><div class="lbl">'+t('boxTotalSpent')+'</div><div class="val tnum bad">'+fmtY(total)+'</div></div>'+
+      '</div>'+
+      '<div style="display:flex; justify-content:flex-end; margin-bottom:14px;">'+
+        '<button class="btn primary small" id="addBoxExpenseBtn">'+t('addBoxExpense')+'</button>'+
+      '</div>'+
+      '<div class="panel">'+rowsHtml+'</div>';
+  }
+
   function renderHeader(){
     document.documentElement.lang = state.lang;
     document.title = t('appTitle');
     var brand = document.querySelector('.brandmark .display');
     if(brand) brand.textContent = t('appTitle');
+    var TAB_LABELS = { dashboard:'tabDashboard', cars:'tabCars', investors:'tabInvestors', box:'tabBox' };
     document.querySelectorAll('#tabs button').forEach(function(b){
-      b.textContent = b.getAttribute('data-tab')==='dashboard' ? t('tabDashboard') : t('tabCars');
-      b.classList.toggle('active', b.getAttribute('data-tab')===state.tab);
+      var tabKey = b.getAttribute('data-tab');
+      b.textContent = t(TAB_LABELS[tabKey] || 'tabDashboard');
+      b.classList.toggle('active', tabKey===state.tab);
     });
     document.querySelectorAll('#langSwitch button').forEach(function(b){
       b.classList.toggle('active', b.getAttribute('data-lang')===state.lang);
@@ -677,8 +840,12 @@
       wrap.innerHTML = '<div class="status-banner">'+t('dbError')+'</div>';
     } else if(state.tab==='dashboard'){
       wrap.innerHTML = renderDashboard();
-    } else {
+    } else if(state.tab==='cars'){
       wrap.innerHTML = renderCars();
+    } else if(state.tab==='investors'){
+      wrap.innerHTML = renderInvestors();
+    } else {
+      wrap.innerHTML = renderBox();
     }
     wireWrapEvents();
     if(state.modalKind==='detail') renderDetailModal();
@@ -697,6 +864,16 @@
     });
     var newCarBtn = document.getElementById('newCarBtn');
     if(newCarBtn) newCarBtn.onclick = function(){ openCarModal(null); };
+    var newInvestorCarBtn = document.getElementById('newInvestorCarBtn');
+    if(newInvestorCarBtn) newInvestorCarBtn.onclick = function(){ openCarModal(null, true); };
+    var addBoxExpenseBtn = document.getElementById('addBoxExpenseBtn');
+    if(addBoxExpenseBtn) addBoxExpenseBtn.onclick = function(){ openBoxModal(null); };
+    wrap.querySelectorAll('[data-edit-box]').forEach(function(el){
+      el.addEventListener('click', function(){ openBoxModal(el.getAttribute('data-edit-box')); });
+    });
+    wrap.querySelectorAll('[data-del-box]').forEach(function(el){
+      el.addEventListener('click', function(){ deleteBoxExpense(el.getAttribute('data-del-box')); });
+    });
   }
 
   document.querySelectorAll('#tabs button').forEach(function(b){
