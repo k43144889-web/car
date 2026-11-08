@@ -156,6 +156,10 @@
   .detail-stat .box .v{font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:22px; margin-top:2px;}
 
   .status-banner{max-width:1080px; margin:14px auto 0; padding:12px 16px; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; font-size:13.5px; color:var(--text-2);}
+  .combo{position:relative;}
+  .combo-list{position:absolute; top:calc(100% + 4px); left:0; right:0; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); z-index:200; max-height:190px; overflow-y:auto;}
+  .combo-list .combo-item{padding:9px 12px; font-size:14px; cursor:pointer;}
+  .combo-list .combo-item:hover{background:var(--surface-2);}
   ::-webkit-scrollbar{width:10px; height:10px;}
   ::-webkit-scrollbar-thumb{background:var(--border); border-radius:6px;}
 </style>
@@ -225,6 +229,94 @@
   function fmtDate(s){ if(!s) return '—'; var p=s.split('-'); if(p.length<3) return s; return p[2]+'.'+p[1]+'.'+p[0]; }
   function todayISO(){ return new Date().toISOString().slice(0,10); }
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+  // ---------- car make/model/year autocomplete ----------
+  var CAR_MODELS = {
+    'Toyota': ['Corolla','Camry','Yaris','Aqua','Prius','Crown','Mark II','Mark X','Chaser','Cresta','Aristo','Supra','86','GR86','GR Yaris','Land Cruiser','Land Cruiser Prado','RAV4','Alphard','Vellfire','Noah','Voxy','Vitz','Vios','Hiace','Hilux','C-HR','Sienta','Passo','Avensis','Harrier','Soarer','Celica','Dyna'],
+    'Lexus': ['IS','ES','GS','LS','RX','NX','UX','RC','LC','LX'],
+    'Nissan': ['Skyline','GT-R','Silvia','180SX','Fairlady Z','Note','March','Leaf','X-Trail','Juke','Qashqai','Serena','Elgrand','Navara','Cube','Murano','Patrol','Sunny','Pulsar','Laurel','Cedric','Gloria','Stagea','Dayz'],
+    'Infiniti': ['Q50','Q60','QX60','QX80','FX'],
+    'Honda': ['Civic','Accord','Fit','Jazz','CR-V','HR-V','Vezel','Freed','Odyssey','Stream','Stepwgn','Integra','NSX','S2000','Beat','Insight','Vamos','N-Box','N-One','City'],
+    'Mazda': ['Demio','Mazda2','Mazda3','Axela','Mazda6','Atenza','CX-3','CX-5','CX-8','CX-60','CX-80','MX-5','RX-7','RX-8','Bongo','Familia'],
+    'Subaru': ['Impreza','WRX','Forester','Outback','Legacy','XV','Levorg','BRZ','Sambar','Crosstrek'],
+    'Mitsubishi': ['Lancer','Lancer Evolution','Outlander','Pajero','Mirage','Delica','Eclipse Cross','ASX','Colt','GTO','Galant'],
+    'Suzuki': ['Swift','Wagon R','Hustler','Jimny','Vitara','Alto','Every','Spacia','Ignis','Baleno','Solio','Escudo'],
+    'Daihatsu': ['Tanto','Move','Mira','Copen','Rocky','Taft','Wake','Cast'],
+    'Isuzu': ['Elf','Bighorn','D-Max'],
+    'Hino': ['Dutro','Ranger'],
+    'Mitsuoka': ['Himiko','Viewt','Orochi','Rock Star'],
+    'Mercedes-Benz': ['A-Class','C-Class','E-Class','S-Class','CLA','CLS','GLA','GLB','GLC','GLE','GLS','G-Class'],
+    'BMW': ['1 Series','2 Series','3 Series','4 Series','5 Series','7 Series','X1','X3','X5','X6','Z4','M3','M5'],
+    'Audi': ['A1','A3','A4','A6','A8','Q2','Q3','Q5','Q7','TT','RS6'],
+    'Volkswagen': ['Golf','Polo','Passat','Tiguan','Touareg','Beetle','T-Roc','Up'],
+    'Porsche': ['911','718 Cayman','718 Boxster','Cayenne','Macan','Panamera'],
+    'Volvo': ['XC40','XC60','XC90','S60','S90','V60'],
+    'Land Rover': ['Range Rover','Range Rover Sport','Range Rover Evoque','Discovery','Discovery Sport','Defender'],
+    'Jeep': ['Wrangler','Cherokee','Grand Cherokee','Compass','Renegade'],
+    'Ford': ['Focus','Fiesta','Mustang','F-150','Explorer','Ranger','Kuga'],
+    'Chevrolet': ['Camaro','Corvette','Silverado','Tahoe','Malibu'],
+    'Tesla': ['Model 3','Model S','Model X','Model Y'],
+    'Hyundai': ['Elantra','Sonata','Tucson','Santa Fe','i30','Kona'],
+    'Kia': ['Sportage','Sorento','Rio','Seltos','Ceed','Picanto'],
+    'Mini': ['Cooper','Countryman','Clubman'],
+    'Chrysler': ['300','Pacifica'],
+    'Peugeot': ['208','308','2008','3008','5008'],
+    'Renault': ['Clio','Megane','Captur','Kadjar']
+  };
+  var ALL_MODELS_FLAT = (function(){
+    var seen = {}, out = [];
+    Object.keys(CAR_MODELS).forEach(function(k){
+      CAR_MODELS[k].forEach(function(m){ if(!seen[m]){ seen[m]=1; out.push(m); } });
+    });
+    return out;
+  })();
+  function matchBrand(text){
+    var t = (text||'').trim().toLowerCase();
+    if(!t) return null;
+    var keys = Object.keys(CAR_MODELS);
+    for(var i=0;i<keys.length;i++){ if(keys[i].toLowerCase()===t) return keys[i]; }
+    return null;
+  }
+  function carMakesFilter(q){
+    var keys = Object.keys(CAR_MODELS).slice().sort();
+    q = (q||'').toLowerCase();
+    return keys.filter(function(k){ return !q || k.toLowerCase().indexOf(q)!==-1; }).slice(0,10);
+  }
+  function carModelsFilter(q){
+    var brandVal = (document.getElementById('f-brand')||{}).value || '';
+    var key = matchBrand(brandVal);
+    var pool = key ? CAR_MODELS[key] : ALL_MODELS_FLAT;
+    q = (q||'').toLowerCase();
+    return pool.filter(function(m){ return !q || m.toLowerCase().indexOf(q)!==-1; }).slice(0,10);
+  }
+  var CUR_YEAR_NOW = new Date().getFullYear();
+  var YEARS_LIST = (function(){ var a=[]; for(var y=CUR_YEAR_NOW+1;y>=1950;y--) a.push(String(y)); return a; })();
+  function yearsFilter(q){
+    q = (q||'').trim();
+    return YEARS_LIST.filter(function(y){ return !q || y.indexOf(q)!==-1; }).slice(0,10);
+  }
+  function setupCombo(inputId, listId, getOptions){
+    var input = document.getElementById(inputId);
+    var list = document.getElementById(listId);
+    if(!input || !list) return;
+    function render(){
+      var q = input.value.trim().toLowerCase();
+      var opts = getOptions(q);
+      if(!opts || !opts.length){ list.hidden = true; list.innerHTML=''; return; }
+      list.innerHTML = opts.map(function(o){ return '<div class="combo-item" data-val="'+esc(o)+'">'+esc(o)+'</div>'; }).join('');
+      list.hidden = false;
+    }
+    input.addEventListener('focus', render);
+    input.addEventListener('input', render);
+    input.addEventListener('blur', function(){ setTimeout(function(){ list.hidden = true; }, 150); });
+    list.addEventListener('mousedown', function(e){
+      var item = e.target.closest('.combo-item');
+      if(!item) return;
+      e.preventDefault();
+      input.value = item.getAttribute('data-val');
+      list.hidden = true;
+    });
+  }
 
   var LANG = {
     ru: {
@@ -439,11 +531,11 @@
       '<button class="btn ghost" id="mClose">✕</button></div>'+
       '<form id="carForm">'+
         '<div class="field-row">'+
-          '<div class="field"><label>'+t('make')+'</label><input id="f-brand" required value="'+esc(car&&car.brand||'')+'" placeholder="Toyota"></div>'+
-          '<div class="field"><label>'+t('model')+'</label><input id="f-model" required value="'+esc(car&&car.model||'')+'" placeholder="Aristo"></div>'+
+          '<div class="field"><label>'+t('make')+'</label><div class="combo"><input id="f-brand" required autocomplete="off" value="'+esc(car&&car.brand||'')+'" placeholder="Toyota"><div class="combo-list" id="f-brand-list" hidden></div></div></div>'+
+          '<div class="field"><label>'+t('model')+'</label><div class="combo"><input id="f-model" required autocomplete="off" value="'+esc(car&&car.model||'')+'" placeholder="Aristo"><div class="combo-list" id="f-model-list" hidden></div></div></div>'+
         '</div>'+
         '<div class="field-row">'+
-          '<div class="field"><label>'+t('year')+'</label><input id="f-year" type="number" min="1960" max="2100" value="'+esc(car&&car.year||'')+'"></div>'+
+          '<div class="field"><label>'+t('year')+'</label><div class="combo"><input id="f-year" type="text" inputmode="numeric" autocomplete="off" value="'+esc(car&&car.year||'')+'"><div class="combo-list" id="f-year-list" hidden></div></div></div>'+
           '<div class="field"><label>'+t('lot')+'</label><input id="f-lot" value="'+esc(car&&car.lot||'')+'"></div>'+
         '</div>'+
         '<div class="field">'+
@@ -474,6 +566,9 @@
     var investCk = document.getElementById('f-investment');
     var investField = document.getElementById('investorNameField');
     investCk.addEventListener('change', function(){ investField.hidden = !investCk.checked; });
+    setupCombo('f-brand', 'f-brand-list', carMakesFilter);
+    setupCombo('f-model', 'f-model-list', carModelsFilter);
+    setupCombo('f-year', 'f-year-list', yearsFilter);
     document.getElementById('carForm').addEventListener('submit', function(e){
       e.preventDefault();
       var data = {
