@@ -124,6 +124,7 @@
   .pill{font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:20px; text-transform:uppercase; letter-spacing:.3px; white-space:nowrap;}
   .pill.active{background:#d9622b22; color:var(--accent-strong);}
   .pill.sold{background:#147a4e22; color:var(--good);}
+  .pill.investor{background:#5b67d622; color:#8f98ff;}
   .stat3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; background:var(--surface-2); border-radius:10px; padding:10px;}
   .stat3 div{text-align:center;}
   .stat3 .l{font-size:10.5px; color:var(--text-3); text-transform:uppercase; font-weight:700;}
@@ -323,7 +324,7 @@
       cat_expense_parts:'Запчасти', cat_expense_repair:'Ремонт / работы', cat_expense_customs:'Растаможка / налоги', cat_expense_other:'Прочее (расход)',
       cat_income_car_sale:'Продажа авто', cat_income_parts_sale:'Продажа запчастей', cat_income_insurance:'Страховая выплата', cat_income_other:'Прочее (доход)',
       tabInvestors:'Инвесторы', tabBox:'Бокс',
-      investmentCar:'Инвестиционная машина (деньги партнёра)', investorName:'Имя инвестора', investorNamePlaceholder:'напр. Алексей',
+      investmentCar:'Инвестиционная машина (деньги партнёра)', investorName:'Имя инвестора', investorNamePlaceholder:'напр. Алексей', investorCar:'Инвестор',
       yourShare:'Ваша доля', investorShare:'Доля инвестора',
       noInvestorCars:'Инвестиционных машин пока нет. Добавьте первую.', addInvestorCar:'+ Машина инвестора',
       boxTotalSpent:'Потрачено на бокс', addBoxExpense:'+ Расход', noBoxExpenses:'Расходов пока нет.',
@@ -350,7 +351,7 @@
       cat_expense_parts:'Parts', cat_expense_repair:'Repair / labor', cat_expense_customs:'Customs / taxes', cat_expense_other:'Other (expense)',
       cat_income_car_sale:'Car sale', cat_income_parts_sale:'Parts sale', cat_income_insurance:'Insurance payout', cat_income_other:'Other (income)',
       tabInvestors:'Investors', tabBox:'Box',
-      investmentCar:"Investment car (partner's money)", investorName:"Investor's name", investorNamePlaceholder:'e.g. Alex',
+      investmentCar:"Investment car (partner's money)", investorName:"Investor's name", investorNamePlaceholder:'e.g. Alex', investorCar:'Investor',
       yourShare:'Your share', investorShare:"Investor's share",
       noInvestorCars:'No investment cars yet. Add your first one.', addInvestorCar:'+ Investor car',
       boxTotalSpent:'Spent on the box', addBoxExpense:'+ Expense', noBoxExpenses:'No expenses yet.',
@@ -742,13 +743,38 @@
     });
   }
 
+  function carCardHtml(c){
+    var s = carStats(c.id);
+    var investor = !!c.isInvestment;
+    var half = s.profit/2;
+    return '<div class="car-card">'+
+      '<div class="top"><div><div class="name">'+esc(carName(c))+'</div>'+(c.lot?'<div class="lot">'+esc(c.lot)+'</div>':'')+
+        (investor && c.investorName?'<div class="lot">'+esc(t('investorName'))+': '+esc(c.investorName)+'</div>':'')+
+      '</div>'+
+      '<div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">'+
+        '<span class="pill '+esc(c.status)+'">'+(c.status==='sold'?t('statusSold'):t('statusActive'))+'</span>'+
+        (investor?'<span class="pill investor">'+t('investorCar')+'</span>':'')+
+      '</div></div>'+
+      '<div class="stat3">'+
+        '<div><div class="l">'+t('invested')+'</div><div class="v tnum">'+fmtY(s.invested)+'</div></div>'+
+        '<div><div class="l">'+t('revenue')+'</div><div class="v tnum">'+fmtY(s.income)+'</div></div>'+
+        '<div><div class="l">'+t('profit')+'</div><div class="v tnum" style="color:'+(s.profit>=0?'var(--good)':'var(--bad)')+'">'+signedY(s.profit)+'</div></div>'+
+      '</div>'+
+      (investor?'<div class="split">'+t('yourShare')+': '+signedY(half)+' · '+t('investorShare')+': '+signedY(half)+'</div>':'')+
+      '<div class="card-actions">'+
+        '<button class="btn small" data-open-car="'+c.id+'">'+t('entries')+'</button>'+
+        '<button class="btn ghost small" data-edit-car="'+c.id+'">'+t('edit')+'</button>'+
+      '</div>'+
+    '</div>';
+  }
+
   function renderDashboard(){
     var s = allStats();
     var activeCars=0, soldCars=0;
-    state.cars.forEach(function(c){ if(c.isInvestment) return; if(c.status==='sold') soldCars++; else activeCars++; });
+    state.cars.forEach(function(c){ if(c.status==='sold') soldCars++; else activeCars++; });
 
     var perCar = [];
-    state.cars.forEach(function(c){ if(c.isInvestment) return; perCar.push(Object.assign({car:c}, carStats(c.id))); });
+    state.cars.forEach(function(c){ perCar.push(Object.assign({car:c}, carStats(c.id))); });
     perCar.sort(function(a,b){ return b.profit - a.profit; });
     var maxAbs = perCar.reduce(function(m,p){ return Math.max(m, Math.abs(p.profit)); }, 1);
 
@@ -756,14 +782,14 @@
       var pct = Math.max(3, Math.round(Math.abs(p.profit)/maxAbs*100));
       var color = p.profit>=0 ? 'var(--good)' : 'var(--bad)';
       return '<div class="bar-row" data-open-car="'+p.car.id+'">'+
-        '<div class="bar-name">'+esc(carName(p.car))+'</div>'+
+        '<div class="bar-name" title="'+(p.car.isInvestment?esc(t('investorCar'))+(p.car.investorName?' ('+esc(p.car.investorName)+')':''):'')+'">'+(p.car.isInvestment?'<span style="color:#8f98ff;">● </span>':'')+esc(carName(p.car))+'</div>'+
         '<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:'+color+';"></div></div>'+
         '<div class="bar-amt tnum" style="color:'+color+'">'+signedY(p.profit)+'</div>'+
       '</div>';
     }).join('') : '<p class="empty">'+t('addCarToSeeProfit')+'</p>';
 
     var feed = [];
-    state.txs.forEach(function(t){ var c = state.cars.get(t.carId); if(c && c.isInvestment) return; feed.push(t); });
+    state.txs.forEach(function(t){ var c = state.cars.get(t.carId); feed.push(t); });
     feed.sort(function(a,b){ return (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''); });
     feed = feed.slice(0,8);
     var feedHtml = feed.length ? feed.map(function(t){
@@ -790,27 +816,12 @@
 
   function renderCars(){
     var list = [];
-    state.cars.forEach(function(c){ if(!c.isInvestment) list.push(c); });
+    state.cars.forEach(function(c){ list.push(c); });
     if(state.carFilter==='active') list = list.filter(function(c){ return c.status!=='sold'; });
     if(state.carFilter==='sold') list = list.filter(function(c){ return c.status==='sold'; });
     list.sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
 
-    var cardsHtml = list.length ? list.map(function(c){
-      var s = carStats(c.id);
-      return '<div class="car-card">'+
-        '<div class="top"><div><div class="name">'+esc(carName(c))+'</div>'+(c.lot?'<div class="lot">'+esc(c.lot)+'</div>':'')+'</div>'+
-        '<span class="pill '+esc(c.status)+'">'+(c.status==='sold'?t('statusSold'):t('statusActive'))+'</span></div>'+
-        '<div class="stat3">'+
-          '<div><div class="l">'+t('invested')+'</div><div class="v tnum">'+fmtY(s.invested)+'</div></div>'+
-          '<div><div class="l">'+t('revenue')+'</div><div class="v tnum">'+fmtY(s.income)+'</div></div>'+
-          '<div><div class="l">'+t('profit')+'</div><div class="v tnum" style="color:'+(s.profit>=0?'var(--good)':'var(--bad)')+'">'+signedY(s.profit)+'</div></div>'+
-        '</div>'+
-        '<div class="card-actions">'+
-          '<button class="btn small" data-open-car="'+c.id+'">'+t('entries')+'</button>'+
-          '<button class="btn ghost small" data-edit-car="'+c.id+'">'+t('edit')+'</button>'+
-        '</div>'+
-      '</div>';
-    }).join('') : '<p class="empty">'+t('noCarsFound')+'</p>';
+    var cardsHtml = list.length ? list.map(carCardHtml).join('') : '<p class="empty">'+t('noCarsFound')+'</p>';
 
     return '<div class="filter-row">'+
       '<button class="chip'+(state.carFilter==='all'?' active':'')+'" data-filter="all">'+t('all')+'</button>'+
@@ -828,26 +839,7 @@
 
     var s = investorStats();
 
-    var cardsHtml = list.length ? list.map(function(c){
-      var st = carStats(c.id);
-      var half = st.profit/2;
-      return '<div class="car-card">'+
-        '<div class="top"><div><div class="name">'+esc(carName(c))+'</div>'+(c.lot?'<div class="lot">'+esc(c.lot)+'</div>':'')+
-          (c.investorName?'<div class="lot">'+esc(t('investorName'))+': '+esc(c.investorName)+'</div>':'')+
-        '</div>'+
-        '<span class="pill '+esc(c.status)+'">'+(c.status==='sold'?t('statusSold'):t('statusActive'))+'</span></div>'+
-        '<div class="stat3">'+
-          '<div><div class="l">'+t('invested')+'</div><div class="v tnum">'+fmtY(st.invested)+'</div></div>'+
-          '<div><div class="l">'+t('revenue')+'</div><div class="v tnum">'+fmtY(st.income)+'</div></div>'+
-          '<div><div class="l">'+t('profit')+'</div><div class="v tnum" style="color:'+(st.profit>=0?'var(--good)':'var(--bad)')+'">'+signedY(st.profit)+'</div></div>'+
-        '</div>'+
-        '<div class="split">'+t('yourShare')+': '+signedY(half)+' · '+t('investorShare')+': '+signedY(half)+'</div>'+
-        '<div class="card-actions">'+
-          '<button class="btn small" data-open-car="'+c.id+'">'+t('entries')+'</button>'+
-          '<button class="btn ghost small" data-edit-car="'+c.id+'">'+t('edit')+'</button>'+
-        '</div>'+
-      '</div>';
-    }).join('') : '<p class="empty">'+t('noInvestorCars')+'</p>';
+    var cardsHtml = list.length ? list.map(carCardHtml).join('') : '<p class="empty">'+t('noInvestorCars')+'</p>';
 
     return '<div class="kpi-grid">'+
         '<div class="kpi"><div class="lbl">'+t('totalInvested')+'</div><div class="val tnum">'+fmtY(s.invested)+'</div></div>'+
